@@ -4,6 +4,7 @@
 import           Options.Applicative
 import           Data.Version                   ( showVersion )
 import           Data.List
+import           Data.Tuple.Select
 
 import qualified Paths_GitFair                 as P
 import           Options
@@ -47,8 +48,12 @@ runStat opt@Options {..} = do
 
   ss <- if exclude1stcommit then return ds else gitCommitStat opt (last cs) >>= \c -> return (ds <> [c])
 
-  putStrLn $ "Git fair stat:"
-  putStrLn $ "  commits: " <> show (length ss)
+  let aggr  = aggregateStat ss
+      total = totalStats aggr
+
+  putStrLn $ "Git fair-stat:"
+  putStrLn $ "  total addition: " <> show (sel1 total) <> ", deletion: " <> show (sel2 total) <> ", commits: " <> show
+    (sel3 total)
   printStat $ aggregateStat ss
 
 
@@ -121,8 +126,9 @@ gitCommitDeltaStat Options {..} [cur, prev] = do
     <> tshow (sum del)
 
   return StatCommit { commit = cur, addition = sum add, deletion = sum del }
+
 gitCommitDeltaStat Options {..} [cur] = return StatCommit { commit = cur, addition = 0, deletion = 0 }
-gitCommitDeltaStat Options {..} _ = errorWithoutStackTrace $ "git-fair: unexpected delta commit statistics" 
+gitCommitDeltaStat Options {..} _     = errorWithoutStackTrace $ "git-fair: unexpected delta commit statistics"
 
 
 gitCommitStat :: Options -> CommitInfo -> IO StatCommit
@@ -149,17 +155,32 @@ gitCommitStat Options {..} com = do
   return StatCommit { commit = com, addition = sum add, deletion = sum del }
 
 
-sumStat :: (Int, Int) -> (Int, Int) -> (Int, Int)
-sumStat a b = (fst a + fst b, snd a + snd b)
+sumStat :: (Int, Int, Int) -> (Int, Int, Int) -> (Int, Int, Int)
+sumStat (a1, a2, a3) (b1, b2, b3) = (a1 + b1, a2 + b2, a3 + b3)
 
 
-aggregateStat :: [StatCommit] -> M.Map T.Text (Int, Int)
-aggregateStat ss = foldr (\st m -> M.insertWith sumStat ((author . commit) st) (addition st, deletion st) m) M.empty ss
+aggregateStat :: [StatCommit] -> M.Map T.Text (Int, Int, Int)
+aggregateStat ss =
+  foldr (\st m -> M.insertWith sumStat ((author . commit) st) (addition st, deletion st, 1) m) M.empty ss
 
 
-printStat :: M.Map T.Text (Int, Int) -> IO ()
+totalStats :: M.Map T.Text (Int, Int, Int) -> (Int, Int, Int)
+totalStats m = foldr (\s v -> sumStat s v) (0, 0, 0) m
+
+
+printStat :: M.Map T.Text (Int, Int, Int) -> IO ()
 printStat m = void $ M.traverseWithKey
-  (\k v -> T.putStrLn $ "   author: " <> k <> " -> " <> "addition: " <> tshow (fst v) <> ", deletion: " <> tshow (snd v)
+  (\k v ->
+    T.putStrLn
+      $  "   author: "
+      <> k
+      <> " -> "
+      <> "addition: "
+      <> tshow (sel1 v)
+      <> ", deletion: "
+      <> tshow (sel2 v)
+      <> ", commits: "
+      <> tshow (sel3 v)
   )
   m
 

@@ -26,6 +26,7 @@ executable git-fair
                        optparse-applicative,
                        filepath,
                        directory,
-                       text
+                       text,
+                       tuple
   
   Ghc-options:       -O2 -Wall -threaded -rtsopts -with-rtsopts=-N
