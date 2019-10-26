@@ -115,7 +115,7 @@ gitCommitDeltaStat Options {..} [cur, prev] = do
                                            )
                                          )
     { std_out = CreatePipe
-    -- , cwd     = repository
+    , cwd     = repository
     }
 
   (add, del, _) <- unzip3 . fmap (parseLine fileExtension) <$> (return . T.lines =<< T.hGetContents hout)
