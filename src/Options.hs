@@ -20,6 +20,7 @@ data Options = Options
     , branch            :: String
     , lastCommit        :: String
     , firstCommit       :: String
+    , fileExtension     :: [String]
     , verbose           :: Bool
     , version           :: Bool
     , ignoreAllSpace    :: Bool
@@ -50,9 +51,17 @@ parseOptions = do
                   "Specify the hash of the first commit"
             )
 
-      exclude1stcommit <- switch (long "exclude-first-commit" <> short '1' <> help "Exclude the first commit from statistics.")
+      fileExtension <- many
+            (strOption
+                  (long "ext" <> short 'e' <> metavar "EXT" <> help
+                        "Specify the file extension(s) to compute the statistics on"
+                  )
+            )
 
-      ignoreAllSpace   <- switch
+      exclude1stcommit <- switch
+            (long "exclude-first-commit" <> short '1' <> help "Exclude the first commit from statistics.")
+
+      ignoreAllSpace <- switch
             (long "ignore-all-space" <> short 'w' <> help "Ignore all while spaces in subsequent diff")
 
       verbose <- switch (long "verbose" <> short 'v' <> help "Enable verbose mode (debug)")

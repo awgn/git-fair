@@ -12,6 +12,7 @@ import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
 import           Data.Text.Read
 import           System.Process
+import           System.FilePath.Posix
 import           Control.Monad
 
 import           SplitGroups
@@ -87,13 +88,19 @@ cropCommits Options {..} cs = case (T.pack firstCommit, T.pack lastCommit) of
     let tmp = mayTake ((+ 1) <$> findIndex (\c -> f `T.isPrefixOf` commitHash c) cs) cs
     in  mayDrop (findIndex (\c -> l `T.isPrefixOf` commitHash c) tmp) tmp
 
+parseLine :: [String] -> T.Text -> (Int, Int, T.Text)
+parseLine [] xs = parseLine' xs
+parseLine ext xs =
+  let (a, d, name) = parseLine' xs
+  in  if any (\e -> e `isExtensionOf` T.unpack name) ext then (a, d, name) else (0, 0, name)
 
-parseLine :: T.Text -> (Int, Int)
-parseLine xs = case decimal xs of
+
+parseLine' :: T.Text -> (Int, Int, T.Text)
+parseLine' xs = case decimal xs of
   Right (a, xs') -> case decimal (T.strip xs') of
-    Right (d, _) -> (a, d)
-    _            -> (0, 0)
-  _ -> (0, 0)
+    Right (d, ys) -> (a, d, T.strip ys)
+    _             -> (0, 0, "")
+  _ -> (0, 0, "")
 
 
 gitCommitDeltaStat :: Options -> [CommitInfo] -> IO StatCommit
@@ -110,7 +117,7 @@ gitCommitDeltaStat Options {..} [cur, prev] = do
     -- , cwd     = repository
     }
 
-  (add, del) <- unzip . fmap parseLine <$> (return . T.lines =<< T.hGetContents hout)
+  (add, del, _) <- unzip3 . fmap (parseLine fileExtension) <$> (return . T.lines =<< T.hGetContents hout)
 
   when verbose
     $  T.putStrLn
@@ -139,7 +146,7 @@ gitCommitStat Options {..} com = do
     , cwd     = repository
     }
 
-  (add, del) <- unzip . fmap parseLine . tail <$> (return . T.lines =<< T.hGetContents hout)
+  (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . tail <$> (return . T.lines =<< T.hGetContents hout)
 
   when verbose
     $  T.putStrLn
