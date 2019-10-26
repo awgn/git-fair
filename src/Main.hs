@@ -64,11 +64,12 @@ mkCommitInfo t = let [h, a] = T.splitOn "|" t in CommitInfo h a
 
 gitCommitInfo :: Options -> IO [CommitInfo]
 gitCommitInfo Options {..} = do
-  (_, Just hout, _, _) <- createProcess (proc "git" ["log", "--pretty=%H|%an"]) { std_out = CreatePipe
-                                                                                , cwd     = repository
-                                                                                }
-  fmap mkCommitInfo <$> (return . T.lines =<< T.hGetContents hout)
-
+  (_, Just hout, _, ph) <- createProcess (proc "git" ["log", "--pretty=%H|%an"]) { std_out = CreatePipe
+                                                                                 , cwd     = repository
+                                                                                 }
+  ret <- fmap mkCommitInfo <$> (return . T.lines =<< T.hGetContents hout)
+  void $ waitForProcess ph
+  return ret
 
 mayDrop :: Maybe Int -> [a] -> [a]
 mayDrop Nothing  x = x
@@ -106,18 +107,20 @@ parseLine' xs = case decimal xs of
 gitCommitDeltaStat :: Options -> [CommitInfo] -> IO StatCommit
 gitCommitDeltaStat Options {..} [cur, prev] = do
 
-  (_, Just hout, _, _) <- createProcess (proc
-                                          "git"
-                                          (  ["diff", "--numstat"]
-                                          <> (if ignoreAllSpace then ["-w"] else [])
-                                          <> [(T.unpack . commitHash) prev, (T.unpack . commitHash) cur]
-                                          )
-                                        )
+  (_, Just hout, _, ph) <- createProcess (proc
+                                           "git"
+                                           (  ["diff", "--numstat"]
+                                           <> (if ignoreAllSpace then ["-w"] else [])
+                                           <> [(T.unpack . commitHash) prev, (T.unpack . commitHash) cur]
+                                           )
+                                         )
     { std_out = CreatePipe
     -- , cwd     = repository
     }
 
   (add, del, _) <- unzip3 . fmap (parseLine fileExtension) <$> (return . T.lines =<< T.hGetContents hout)
+
+  void $ waitForProcess ph
 
   when verbose
     $  T.putStrLn
