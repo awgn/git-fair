@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Options
       ( Options(..)
@@ -15,23 +16,23 @@ import           Data.Semigroup                 ( (<>)
 -- import Control.Applicative
 
 data Options = Options
-    {
-      repository        :: String
+    { repository        :: Maybe String
     , branch            :: String
     , lastCommit        :: String
     , firstCommit       :: String
     , verbose           :: Bool
     , version           :: Bool
-    , files             :: [String]
+    , ignoreAllSpace    :: Bool
+    , exclude1stcommit  :: Bool
     } deriving (Show)
 
 
 parseOptions :: Parser Options
 parseOptions = do
 
-      repository <- strOption
-            (long "repository" <> metavar "PATH" <> value "." <> help
-                  "Specify the git repository (default current directory)"
+      repository :: Maybe String <- optional
+            (strOption
+                  (long "repository" <> metavar "PATH" <> help "Specify the git repository (default current directory)")
             )
 
       branch <- strOption
@@ -44,17 +45,19 @@ parseOptions = do
                   "Specify the hash of the last-commit (default is 'HEAD')"
             )
 
-      firstCommit <-
-            strOption
-                  (long "last-commit" <> short 'l' <> metavar "HASH" <> value "" <> help
-                        "Specify the hash of the first commit"
-                  )
+      firstCommit <- strOption
+            (long "first-commit" <> short 'f' <> metavar "HASH" <> value "" <> help
+                  "Specify the hash of the first commit"
+            )
 
+      exclude1stcommit <- switch (long "exclude-first-commit" <> short '1' <> help "Exclude the first commit from statistics.")
+
+      ignoreAllSpace   <- switch
+            (long "ignore-all-space" <> short 'w' <> help "Ignore all while spaces in subsequent diff")
 
       verbose <- switch (long "verbose" <> short 'v' <> help "Enable verbose mode (debug)")
 
       version <- switch (long "version" <> short 'V' <> help "Print version")
 
-      files   <- some (argument str (metavar "FILES..."))
       pure Options { .. }
 
