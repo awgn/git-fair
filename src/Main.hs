@@ -32,13 +32,14 @@ main' o@Options {..} | version   = putStrLn $ showVersion P.version
 
 data CommitInfo = CommitInfo
     { commitHash :: T.Text
+    , parentHash :: [T.Text]
     , author     :: T.Text
     } deriving (Show,Eq)
 
 data StatCommit = StatCommit
-    { commit    :: CommitInfo
-    , addition  :: Int
-    , deletion  :: Int
+    { commit     :: CommitInfo
+    , insertions :: Int
+    , deletions  :: Int
     } deriving (Show,Eq)
 
 
@@ -52,22 +53,22 @@ runStat opt@Options {..} = do
   let aggr  = aggregateStat ss
       total = totalStats aggr
 
-  putStrLn $ "Git fair-stat:"
-  putStrLn $ "  total addition: " <> show (sel1 total) <> ", deletion: " <> show (sel2 total) <> ", commits: " <> show
+  putStrLn "Gi t fair-stat:"
+  putStrLn $ "  total insertions:" <> show (sel1 total) <> ", deletions: " <> show (sel2 total) <> ", commits: " <> show
     (sel3 total)
   printStat $ aggregateStat ss
 
 
 mkCommitInfo :: T.Text -> CommitInfo
-mkCommitInfo t = let [h, a] = T.splitOn "|" t in CommitInfo h a
+mkCommitInfo t = let [a, h, ps] = T.splitOn "|" t in CommitInfo h (T.splitOn " " ps) a
 
 
 gitCommitInfo :: Options -> IO [CommitInfo]
 gitCommitInfo Options {..} = do
-  (_, Just hout, _, ph) <- createProcess (proc "git" ["log", "--pretty=%H|%an"]) { std_out = CreatePipe
-                                                                                 , cwd     = repository
-                                                                                 }
-  ret <- fmap mkCommitInfo <$> (return . T.lines =<< T.hGetContents hout)
+  (_, Just hout, _, ph) <- createProcess (proc "git" ["log", "--pretty=%an|%H|%P"]) { std_out = CreatePipe
+                                                                                    , cwd     = repository
+                                                                                    }
+  ret <- fmap mkCommitInfo . T.lines <$> T.hGetContents hout
   void $ waitForProcess ph
   return ret
 
@@ -89,6 +90,7 @@ cropCommits Options {..} cs = case (T.pack firstCommit, T.pack lastCommit) of
     let tmp = mayTake ((+ 1) <$> findIndex (\c -> f `T.isPrefixOf` commitHash c) cs) cs
     in  mayDrop (findIndex (\c -> l `T.isPrefixOf` commitHash c) tmp) tmp
 
+
 parseLine :: [String] -> T.Text -> (Int, Int, T.Text)
 parseLine [] xs = parseLine' xs
 parseLine ext xs =
@@ -109,16 +111,16 @@ gitCommitDeltaStat Options {..} [cur, prev] = do
 
   (_, Just hout, _, ph) <- createProcess (proc
                                            "git"
-                                           (  ["diff", "--numstat"]
-                                           <> (if ignoreAllSpace then ["-w"] else [])
-                                           <> [(T.unpack . commitHash) prev, (T.unpack . commitHash) cur]
+                                           (["diff", "--numstat"] <> if ignoreAllSpace
+                                             then ["-w"]
+                                             else [] <> [(T.unpack . commitHash) prev, (T.unpack . commitHash) cur]
                                            )
                                          )
     { std_out = CreatePipe
     , cwd     = repository
     }
 
-  (add, del, _) <- unzip3 . fmap (parseLine fileExtension) <$> (return . T.lines =<< T.hGetContents hout)
+  (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . T.lines <$> T.hGetContents hout
 
   void $ waitForProcess ph
 
@@ -130,15 +132,15 @@ gitCommitDeltaStat Options {..} [cur, prev] = do
     <> commitHash prev
     <> " -> "
     <> commitHash cur
-    <> " | addition: "
+    <> " | insertions:"
     <> tshow (sum add)
-    <> " deletion: "
+    <> " deletions: "
     <> tshow (sum del)
 
-  return StatCommit { commit = cur, addition = sum add, deletion = sum del }
+  return StatCommit { commit = cur, insertions = sum add, deletions = sum del }
 
-gitCommitDeltaStat Options {..} [cur] = return StatCommit { commit = cur, addition = 0, deletion = 0 }
-gitCommitDeltaStat Options {..} _     = errorWithoutStackTrace $ "git-fair: unexpected delta commit statistics"
+gitCommitDeltaStat Options {..} [cur] = return StatCommit { commit = cur, insertions = 0, deletions = 0 }
+gitCommitDeltaStat Options {..} _     = errorWithoutStackTrace "git-fair: unexpected delta commit statistics"
 
 
 gitCommitStat :: Options -> CommitInfo -> IO StatCommit
@@ -149,7 +151,7 @@ gitCommitStat Options {..} com = do
     , cwd     = repository
     }
 
-  (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . tail <$> (return . T.lines =<< T.hGetContents hout)
+  (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . tail . T.lines <$> T.hGetContents hout
 
   when verbose
     $  T.putStrLn
@@ -157,12 +159,12 @@ gitCommitStat Options {..} com = do
     <> author com
     <> "] "
     <> commitHash com
-    <> " | addition: "
+    <> " | insertions:"
     <> tshow (sum add)
-    <> " deletion: "
+    <> " deletions: "
     <> tshow (sum del)
 
-  return StatCommit { commit = com, addition = sum add, deletion = sum del }
+  return StatCommit { commit = com, insertions = sum add, deletions = sum del }
 
 
 sumStat :: (Int, Int, Int) -> (Int, Int, Int) -> (Int, Int, Int)
@@ -171,11 +173,11 @@ sumStat (a1, a2, a3) (b1, b2, b3) = (a1 + b1, a2 + b2, a3 + b3)
 
 aggregateStat :: [StatCommit] -> M.Map T.Text (Int, Int, Int)
 aggregateStat ss =
-  foldr (\st m -> M.insertWith sumStat ((author . commit) st) (addition st, deletion st, 1) m) M.empty ss
+  foldr (\st m -> M.insertWith sumStat ((author . commit) st) (insertions st, deletions st, 1) m) M.empty ss
 
 
 totalStats :: M.Map T.Text (Int, Int, Int) -> (Int, Int, Int)
-totalStats m = foldr (\s v -> sumStat s v) (0, 0, 0) m
+totalStats = foldr sumStat (0, 0, 0)
 
 
 printStat :: M.Map T.Text (Int, Int, Int) -> IO ()
@@ -184,10 +186,10 @@ printStat m = void $ M.traverseWithKey
     T.putStrLn
       $  "   author: "
       <> k
-      <> " -> "
-      <> "addition: "
+      <> " ->  "
+      <> "insertions:"
       <> tshow (sel1 v)
-      <> ", deletion: "
+      <> ", deletions: "
       <> tshow (sel2 v)
       <> ", commits: "
       <> tshow (sel3 v)
