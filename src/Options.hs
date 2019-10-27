@@ -36,9 +36,7 @@ parseOptions = do
             )
 
       branch <- strOption
-            (long "branch" <> metavar "NAME" <> value "master" <> help
-                  "Specify the branch to analyze (default is 'master')"
-            )
+            (long "branch" <> metavar "NAME" <> value "" <> help "Specify the branch to analyze (default is 'master')")
 
       lastCommit <- strOption
             (long "last-commit" <> short 'l' <> metavar "HASH" <> value "" <> help

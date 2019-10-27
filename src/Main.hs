@@ -49,7 +49,7 @@ runStat opt@Options {..} = do
   let aggr  = aggregateStat ss
       total = totalStats aggr
 
-  putStrLn "Git fair-stat:"
+  if null branch then putStrLn "Git fair-stat (current branch):" else putStrLn $ "Git fair-stat (" <> branch <> "):"
   putStrLn $ "  total insertions:" <> show (sel1 total) <> ", deletions: " <> show (sel2 total) <> ", commits: " <> show
     (sel3 total)
   printStat $ aggregateStat ss
@@ -61,9 +61,11 @@ mkCommitInfo t = let [a, h, ps] = T.splitOn "|" t in CommitInfo h (T.splitOn " "
 
 gitCommitInfo :: Options -> IO [CommitInfo]
 gitCommitInfo Options {..} = do
-  (_, Just hout, _, ph) <- createProcess (proc "git" ["log", "--pretty=%an|%H|%P"]) { std_out = CreatePipe
-                                                                                    , cwd     = repository
-                                                                                    }
+  (_, Just hout, _, ph) <- createProcess (proc "git" (["log", "--pretty=%an|%H|%P"] <> [ branch | (not . null) branch ])
+                                         )
+    { std_out = CreatePipe
+    , cwd     = repository
+    }
   ret <- fmap mkCommitInfo . T.lines <$> T.hGetContents hout
   void $ waitForProcess ph
   return ret
@@ -115,13 +117,12 @@ gitCommitDeltaStat Options {..} com = do
   (_, Just hout, _, ph) <- createProcess (proc
                                            "git"
                                            (  ["diff", "--numstat"]
-                                           <> (if ignoreAllSpace then ["-w"] else [])
+                                           <> [ "-w" | ignoreAllSpace ]
                                            <> [(T.unpack . head . parentHash) com, (T.unpack . commitHash) com]
                                            )
-                                         )
-    { std_out = CreatePipe
-    , cwd     = repository
-    }
+                                         ) { std_out = CreatePipe
+                                           , cwd     = repository
+                                           }
 
   (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . T.lines <$> T.hGetContents hout
 
