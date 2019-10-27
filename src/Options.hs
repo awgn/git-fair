@@ -24,7 +24,6 @@ data Options = Options
     , verbose           :: Bool
     , version           :: Bool
     , ignoreAllSpace    :: Bool
-    , exclude1stcommit  :: Bool
     } deriving (Show)
 
 
@@ -57,9 +56,6 @@ parseOptions = do
                         "Specify the file extension(s) to compute the statistics on"
                   )
             )
-
-      exclude1stcommit <- switch
-            (long "exclude-first-commit" <> short '1' <> help "Exclude the first commit from statistics.")
 
       ignoreAllSpace <- switch
             (long "ignore-all-space" <> short 'w' <> help "Ignore all while spaces in subsequent diff")

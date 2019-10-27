@@ -15,8 +15,6 @@ import           System.Process
 import           System.FilePath.Posix
 import           Control.Monad
 
-import           SplitGroups
-
 import qualified Data.Map.Strict               as M
 
 
@@ -36,7 +34,7 @@ data CommitInfo = CommitInfo
     , author     :: T.Text
     } deriving (Show,Eq)
 
-data StatCommit = StatCommit
+data CommitStat = CommitStat
     { commit     :: CommitInfo
     , insertions :: Int
     , deletions  :: Int
@@ -46,14 +44,12 @@ data StatCommit = StatCommit
 runStat :: Options -> IO ()
 runStat opt@Options {..} = do
   cs <- cropCommits opt <$> gitCommitInfo opt
-  ds <- mapM (gitCommitDeltaStat opt) (spanGroups 2 cs)
-
-  ss <- if exclude1stcommit then return ds else gitCommitStat opt (last cs) >>= \c -> return (ds <> [c])
+  ss <- mapM (gitCommitStat opt) cs
 
   let aggr  = aggregateStat ss
       total = totalStats aggr
 
-  putStrLn "Gi t fair-stat:"
+  putStrLn "Git fair-stat:"
   putStrLn $ "  total insertions:" <> show (sel1 total) <> ", deletions: " <> show (sel2 total) <> ", commits: " <> show
     (sel3 total)
   printStat $ aggregateStat ss
@@ -71,6 +67,7 @@ gitCommitInfo Options {..} = do
   ret <- fmap mkCommitInfo . T.lines <$> T.hGetContents hout
   void $ waitForProcess ph
   return ret
+
 
 mayDrop :: Maybe Int -> [a] -> [a]
 mayDrop Nothing  x = x
@@ -106,14 +103,20 @@ parseLine' xs = case decimal xs of
   _ -> (0, 0, "")
 
 
-gitCommitDeltaStat :: Options -> [CommitInfo] -> IO StatCommit
-gitCommitDeltaStat Options {..} [cur, prev] = do
+gitCommitStat :: Options -> CommitInfo -> IO CommitStat
+gitCommitStat Options {..} com = case parentHash com of
+  ("" : _) -> gitCommitSingleStat Options { .. } com
+  []       -> gitCommitSingleStat Options { .. } com
+  _        -> gitCommitDeltaStat Options { .. } com
 
+
+gitCommitDeltaStat :: Options -> CommitInfo -> IO CommitStat
+gitCommitDeltaStat Options {..} com = do
   (_, Just hout, _, ph) <- createProcess (proc
                                            "git"
-                                           (["diff", "--numstat"] <> if ignoreAllSpace
-                                             then ["-w"]
-                                             else [] <> [(T.unpack . commitHash) prev, (T.unpack . commitHash) cur]
+                                           (  ["diff", "--numstat"]
+                                           <> (if ignoreAllSpace then ["-w"] else [])
+                                           <> [(T.unpack . head . parentHash) com, (T.unpack . commitHash) com]
                                            )
                                          )
     { std_out = CreatePipe
@@ -127,24 +130,21 @@ gitCommitDeltaStat Options {..} [cur, prev] = do
   when verbose
     $  T.putStrLn
     $  " ["
-    <> author cur
+    <> author com
     <> "] "
-    <> commitHash prev
+    <> tshow (parentHash com)
     <> " -> "
-    <> commitHash cur
+    <> commitHash com
     <> " | insertions:"
     <> tshow (sum add)
     <> " deletions: "
     <> tshow (sum del)
 
-  return StatCommit { commit = cur, insertions = sum add, deletions = sum del }
-
-gitCommitDeltaStat Options {..} [cur] = return StatCommit { commit = cur, insertions = 0, deletions = 0 }
-gitCommitDeltaStat Options {..} _     = errorWithoutStackTrace "git-fair: unexpected delta commit statistics"
+  return CommitStat { commit = com, insertions = sum add, deletions = sum del }
 
 
-gitCommitStat :: Options -> CommitInfo -> IO StatCommit
-gitCommitStat Options {..} com = do
+gitCommitSingleStat :: Options -> CommitInfo -> IO CommitStat
+gitCommitSingleStat Options {..} com = do
   (_, Just hout, _, _) <- createProcess (proc "git" (["log", "--oneline", "--numstat"] <> [(T.unpack . commitHash) com])
                                         )
     { std_out = CreatePipe
@@ -164,14 +164,14 @@ gitCommitStat Options {..} com = do
     <> " deletions: "
     <> tshow (sum del)
 
-  return StatCommit { commit = com, insertions = sum add, deletions = sum del }
+  return CommitStat { commit = com, insertions = sum add, deletions = sum del }
 
 
 sumStat :: (Int, Int, Int) -> (Int, Int, Int) -> (Int, Int, Int)
 sumStat (a1, a2, a3) (b1, b2, b3) = (a1 + b1, a2 + b2, a3 + b3)
 
 
-aggregateStat :: [StatCommit] -> M.Map T.Text (Int, Int, Int)
+aggregateStat :: [CommitStat] -> M.Map T.Text (Int, Int, Int)
 aggregateStat ss =
   foldr (\st m -> M.insertWith sumStat ((author . commit) st) (insertions st, deletions st, 1) m) M.empty ss
 
