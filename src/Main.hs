@@ -13,6 +13,7 @@ import qualified Data.Text.IO                  as T
 import           Data.Text.Read
 import           System.Process
 import           System.FilePath.Posix
+import           System.IO
 import           Control.Monad
 
 import qualified Data.Map.Strict               as M
@@ -49,7 +50,7 @@ runStat opt@Options {..} = do
   let aggr  = aggregateStat ss
       total = totalStats aggr
 
-  if null branch then putStrLn "Git fair-stat (current branch):" else putStrLn $ "Git fair-stat (" <> branch <> "):"
+  if null branch then putStrLn "\nGit fair-stat (current branch):" else putStrLn $ "Git fair-stat (" <> branch <> "):"
   putStrLn $ "  total insertions:" <> show (sel1 total) <> ", deletions: " <> show (sel2 total) <> ", commits: " <> show
     (sel3 total)
   printStat $ aggregateStat ss
@@ -61,11 +62,10 @@ mkCommitInfo t = let [a, h, ps] = T.splitOn "|" t in CommitInfo h (T.splitOn " "
 
 gitCommitInfo :: Options -> IO [CommitInfo]
 gitCommitInfo Options {..} = do
-  (_, Just hout, _, ph) <- createProcess (proc "git" (["log", "--pretty=%an|%H|%P"] <> [ branch | (not . null) branch ])
-                                         )
-    { std_out = CreatePipe
-    , cwd     = repository
-    }
+  (_, Just hout, _, ph) <- createProcess
+    (proc "git" (["log", "--first-parent", "--pretty=%an|%H|%P"] <> [ branch | (not . null) branch ])) { std_out = CreatePipe
+                                                                                                       , cwd = repository
+                                                                                                       }
   ret <- fmap mkCommitInfo . T.lines <$> T.hGetContents hout
   void $ waitForProcess ph
   return ret
@@ -105,6 +105,11 @@ parseLine' xs = case decimal xs of
   _ -> (0, 0, "")
 
 
+mkIcon :: Int -> T.Text -> Char
+mkIcon 0 = const '.'
+mkIcon _ = T.head
+
+
 gitCommitStat :: Options -> CommitInfo -> IO CommitStat
 gitCommitStat Options {..} com = case parentHash com of
   ("" : _) -> gitCommitSingleStat Options { .. } com
@@ -126,20 +131,25 @@ gitCommitDeltaStat Options {..} com = do
 
   (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . T.lines <$> T.hGetContents hout
 
+  let totalAdd = sum add
+      totalDel = sum del
+
   void $ waitForProcess ph
 
-  when verbose
-    $  T.putStrLn
-    $  " ["
-    <> author com
-    <> "] "
-    <> tshow (parentHash com)
-    <> " -> "
-    <> commitHash com
-    <> " | insertions:"
-    <> tshow (sum add)
-    <> " deletions: "
-    <> tshow (sum del)
+  if verbose
+    then
+      T.putStrLn
+      $  " ["
+      <> author com
+      <> "] "
+      <> tshow (parentHash com)
+      <> " -> "
+      <> commitHash com
+      <> " | insertions:"
+      <> tshow (sum add)
+      <> " deletions: "
+      <> tshow (sum del)
+    else putChar (mkIcon (totalAdd + totalDel) (author com)) >> hFlush stdout
 
   return CommitStat { commit = com, insertions = sum add, deletions = sum del }
 
@@ -154,16 +164,20 @@ gitCommitSingleStat Options {..} com = do
 
   (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . tail . T.lines <$> T.hGetContents hout
 
-  when verbose
-    $  T.putStrLn
-    $  " ["
-    <> author com
-    <> "] "
-    <> commitHash com
-    <> " | insertions:"
-    <> tshow (sum add)
-    <> " deletions: "
-    <> tshow (sum del)
+  let totalAdd = sum add
+      totalDel = sum del
+  if verbose
+    then
+      T.putStrLn
+      $  " ["
+      <> author com
+      <> "] "
+      <> commitHash com
+      <> " | insertions:"
+      <> tshow (sum add)
+      <> " deletions: "
+      <> tshow (sum del)
+    else putChar (mkIcon (totalAdd + totalDel) (author com)) >> hFlush stdout
 
   return CommitStat { commit = com, insertions = sum add, deletions = sum del }
 
