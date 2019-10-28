@@ -50,10 +50,15 @@ runStat opt@Options {..} = do
   let aggr  = aggregateStat ss
       total = totalStats aggr
 
-  if null branch then putStrLn "\nGit fair-stat (current branch):" else putStrLn $ "Git fair-stat (" <> branch <> "):"
-  putStrLn $ "  total insertions:" <> show (sel1 total) <> ", deletions: " <> show (sel2 total) <> ", commits: " <> show
-    (sel3 total)
+  if null branch then putStrLn "\nGit fair-stat (current branch):" else putStrLn $ "\nGit fair-stat (" <> branch <> "):"
   printStat $ aggregateStat ss
+  putStrLn
+    $  "\n   TOTAL : insertions:"
+    <> show (sel1 total)
+    <> ", deletions: "
+    <> show (sel2 total)
+    <> ", commits: "
+    <> show (sel3 total)
 
 
 mkCommitInfo :: T.Text -> CommitInfo
@@ -146,9 +151,10 @@ gitCommitDeltaStat Options {..} com = do
       <> " -> "
       <> commitHash com
       <> " | insertions:"
-      <> tshow (sum add)
+      <> tshow totalAdd
       <> " deletions: "
-      <> tshow (sum del)
+      <> tshow totalDel
+      <> if (totalAdd + totalDel) == 0 then " (SKIPPED)" else ""
     else putChar (mkIcon (totalAdd + totalDel) (author com)) >> hFlush stdout
 
   return CommitStat { commit = com, insertions = sum add, deletions = sum del }
@@ -174,9 +180,10 @@ gitCommitSingleStat Options {..} com = do
       <> "] "
       <> commitHash com
       <> " | insertions:"
-      <> tshow (sum add)
+      <> tshow totalAdd
       <> " deletions: "
-      <> tshow (sum del)
+      <> tshow totalDel
+      <> if (totalAdd + totalDel) == 0 then " (SKIPPED)" else ""
     else putChar (mkIcon (totalAdd + totalDel) (author com)) >> hFlush stdout
 
   return CommitStat { commit = com, insertions = sum add, deletions = sum del }
@@ -201,7 +208,7 @@ printStat m = void $ M.traverseWithKey
     T.putStrLn
       $  "   author: "
       <> k
-      <> " ->  "
+      <> " -> "
       <> "insertions:"
       <> tshow (sel1 v)
       <> ", deletions: "
