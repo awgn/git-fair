@@ -9,6 +9,9 @@ module Options
 where
 
 import           Options.Applicative
+import           Data.Semigroup                 ( (<>)
+                                                , Semigroup(..)
+                                                )
 
 -- import Control.Applicative
 
