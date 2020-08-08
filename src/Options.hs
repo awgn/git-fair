@@ -9,21 +9,18 @@ module Options
 where
 
 import           Options.Applicative
-import           Data.Semigroup                 ( (<>)
-                                                , Semigroup(..)
-                                                )
 
 -- import Control.Applicative
 
 data Options = Options
-    { repository        :: Maybe String
-    , branch            :: String
-    , lastCommit        :: String
-    , firstCommit       :: String
-    , fileExtension     :: [String]
-    , verbose           :: Bool
-    , version           :: Bool
-    , ignoreAllSpace    :: Bool
+    { repository        :: !(Maybe String)
+    , fileExtension     :: ![String]
+    , branch            :: !String
+    , lastCommit        :: !String
+    , firstCommit       :: !String
+    , verbose           :: !Bool
+    , version           :: !Bool
+    , ignoreAllSpace    :: !Bool
     } deriving (Show)
 
 

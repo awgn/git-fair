@@ -30,15 +30,15 @@ main' o@Options {..} | version   = putStrLn $ showVersion P.version
 
 
 data CommitInfo = CommitInfo
-    { commitHash :: T.Text
-    , parentHash :: [T.Text]
-    , author     :: T.Text
+    { author       :: !T.Text
+    , commitHash   :: !T.Text
+    , parentHashes :: ![T.Text]
     } deriving (Show,Eq)
 
 data CommitStat = CommitStat
-    { commit     :: CommitInfo
-    , insertions :: Int
-    , deletions  :: Int
+    { commit     :: {-# UNPACK #-} !CommitInfo
+    , insertions :: {-# UNPACK #-} !Int
+    , deletions  :: {-# UNPACK #-} !Int
     } deriving (Show,Eq)
 
 
@@ -62,7 +62,9 @@ runStat opt@Options {..} = do
 
 
 mkCommitInfo :: T.Text -> CommitInfo
-mkCommitInfo t = let [a, h, ps] = T.splitOn "|" t in CommitInfo h (T.splitOn " " ps) a
+mkCommitInfo t = let [author, commitHash, ps] = T.splitOn "|" t 
+                     parentHashes = T.splitOn " " ps
+                      in CommitInfo{..}
 
 
 gitCommitInfo :: Options -> IO [CommitInfo]
@@ -79,6 +81,7 @@ gitCommitInfo Options {..} = do
 mayDrop :: Maybe Int -> [a] -> [a]
 mayDrop Nothing  x = x
 mayDrop (Just n) x = drop n x
+
 
 mayTake :: Maybe Int -> [a] -> [a]
 mayTake Nothing  x = x
@@ -116,7 +119,7 @@ mkIcon _ = T.head
 
 
 gitCommitStat :: Options -> CommitInfo -> IO CommitStat
-gitCommitStat Options {..} com = case parentHash com of
+gitCommitStat Options {..} com = case parentHashes com of
   ("" : _) -> gitCommitSingleStat Options { .. } com
   []       -> gitCommitSingleStat Options { .. } com
   _        -> gitCommitDeltaStat Options { .. } com
@@ -128,7 +131,7 @@ gitCommitDeltaStat Options {..} com = do
                                            "git"
                                            (  ["diff", "--numstat"]
                                            <> [ "-w" | ignoreAllSpace ]
-                                           <> [(T.unpack . head . parentHash) com, (T.unpack . commitHash) com]
+                                           <> [(T.unpack . head . parentHashes) com, (T.unpack . commitHash) com]
                                            )
                                          ) { std_out = CreatePipe
                                            , cwd     = repository
@@ -147,7 +150,7 @@ gitCommitDeltaStat Options {..} com = do
       $  " ["
       <> author com
       <> "] "
-      <> tshow (parentHash com)
+      <> tshow (parentHashes com)
       <> " -> "
       <> commitHash com
       <> " | insertions:"

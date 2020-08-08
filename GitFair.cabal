@@ -29,4 +29,7 @@ executable git-fair
                        text,
                        tuple
   
-  Ghc-options:       -O2 -Wall -threaded -rtsopts -with-rtsopts=-N
+  Ghc-options:  -Wall 
+                -funbox-strict-fields 
+                -fwrite-ide-info 
+                -hiedir=.hie
