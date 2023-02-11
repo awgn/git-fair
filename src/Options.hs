@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DerivingStrategies #-}
 
 module Options
       ( Options(..)
@@ -21,7 +22,7 @@ data Options = Options
     , verbose           :: !Bool
     , version           :: !Bool
     , ignoreAllSpace    :: !Bool
-    } deriving (Show)
+    } deriving stock (Show)
 
 
 parseOptions :: Parser Options
@@ -60,4 +61,3 @@ parseOptions = do
       version <- switch (long "version" <> short 'V' <> help "Print version")
 
       pure Options { .. }
-

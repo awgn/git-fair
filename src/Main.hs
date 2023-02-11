@@ -1,45 +1,52 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
 
-import           Options.Applicative
-import           Data.Version                   ( showVersion )
-import           Data.List
-import           Data.Tuple.Select
+import Options.Applicative
+    ( header, fullDesc, helper, info, execParser )
+import Data.List ( findIndex )
+import Data.Tuple.Select ( Sel3(sel3), Sel2(sel2), Sel1(sel1) )
 
-import qualified Paths_GitFair                 as P
-import           Options
-import qualified Data.Text                     as T
-import qualified Data.Text.IO                  as T
-import           Data.Text.Read
-import           System.Process
-import           System.FilePath.Posix
-import           System.IO
-import           Control.Monad
+import Options ( parseOptions, Options(..) )
+import qualified Data.Text      as T
+import qualified Data.Text.IO   as T
+import Data.Text.Read ( decimal )
+import TextShow ( TextShow(showt) )
 
-import qualified Data.Map.Strict               as M
+import System.Process
+    ( waitForProcess,
+      proc,
+      createProcess,
+      StdStream(CreatePipe),
+      CreateProcess(cwd, std_out) )
+import System.FilePath.Posix ( isExtensionOf )
+import System.IO ( stdout, hFlush )
+import Control.Monad ( void )
 
+import qualified Data.Map.Strict  as M
+
+import qualified Paths_GitFair  as P
+import Data.Version ( showVersion )
 
 main :: IO ()
 main = execParser opts >>= main'
   where opts = info (helper <*> parseOptions) (fullDesc <> header "git-fair: git statistical tool")
-
-
-main' :: Options -> IO ()
-main' o@Options {..} | version   = putStrLn $ showVersion P.version
-                     | otherwise = runStat o
-
+        main' :: Options -> IO ()
+        main' o@Options {..} | version   = putStrLn $ showVersion P.version
+                             | otherwise = runStat o
 
 data CommitInfo = CommitInfo
     { author       :: !T.Text
     , commitHash   :: !T.Text
     , parentHashes :: ![T.Text]
-    } deriving (Show,Eq)
+    } deriving stock (Show,Eq)
+
 
 data CommitStat = CommitStat
     { commit     :: {-# UNPACK #-} !CommitInfo
     , insertions :: {-# UNPACK #-} !Int
     , deletions  :: {-# UNPACK #-} !Int
-    } deriving (Show,Eq)
+    } deriving stock (Show,Eq)
 
 
 runStat :: Options -> IO ()
@@ -50,43 +57,33 @@ runStat opt@Options {..} = do
   let aggr  = aggregateStat ss
       total = totalStats aggr
 
-  if null branch then putStrLn "\nGit fair-stat (current branch):" else putStrLn $ "\nGit fair-stat (" <> branch <> "):"
+  if null branch
+    then T.putStrLn "\nGit fair-stat (current branch):"
+    else T.putStrLn $ "\nGit fair-stat (" <> showt branch <> "):"
+
   printStat $ aggregateStat ss
-  putStrLn
-    $  "\n   TOTAL : insertions:"
-    <> show (sel1 total)
-    <> ", deletions: "
-    <> show (sel2 total)
-    <> ", commits: "
-    <> show (sel3 total)
+  T.putStrLn
+    $ "\n   TOTAL : insertions:" <> showt (sel1 total) <> ", deletions: "
+    <> showt (sel2 total) <> ", commits: " <> showt (sel3 total)
 
 
 mkCommitInfo :: T.Text -> CommitInfo
-mkCommitInfo t = let [author, commitHash, ps] = T.splitOn "|" t 
-                     parentHashes = T.splitOn " " ps
-                      in CommitInfo{..}
+mkCommitInfo t =
+  case T.splitOn "|" t of
+    [author, commitHash, ps] -> let parentHashes = T.splitOn " " ps in CommitInfo{..}
+    _ -> error "mkCommitInfo: invalid commit info"
 
 
 gitCommitInfo :: Options -> IO [CommitInfo]
 gitCommitInfo Options {..} = do
   (_, Just hout, _, ph) <- createProcess
-    (proc "git" (["log", "--first-parent", "--pretty=%an|%H|%P"] <> [ branch | (not . null) branch ])) { std_out = CreatePipe
-                                                                                                       , cwd = repository
-                                                                                                       }
+    (proc "git" (["log", "--first-parent", "--pretty=%an|%H|%P"] <>
+      [ branch | (not . null) branch ])) { std_out = CreatePipe
+                                         , cwd = repository
+                                         }
   ret <- fmap mkCommitInfo . T.lines <$> T.hGetContents hout
   void $ waitForProcess ph
   return ret
-
-
-mayDrop :: Maybe Int -> [a] -> [a]
-mayDrop Nothing  x = x
-mayDrop (Just n) x = drop n x
-
-
-mayTake :: Maybe Int -> [a] -> [a]
-mayTake Nothing  x = x
-mayTake (Just n) x = take n x
-
 
 cropCommits :: Options -> [CommitInfo] -> [CommitInfo]
 cropCommits Options {..} cs = case (T.pack firstCommit, T.pack lastCommit) of
@@ -106,16 +103,14 @@ parseLine ext xs =
 
 
 parseLine' :: T.Text -> (Int, Int, T.Text)
-parseLine' xs = case decimal xs of
-  Right (a, xs') -> case decimal (T.strip xs') of
-    Right (d, ys) -> (a, d, T.strip ys)
-    _             -> (0, 0, "")
-  _ -> (0, 0, "")
-
-
-mkIcon :: Int -> T.Text -> Char
-mkIcon 0 = const '.'
-mkIcon _ = T.head
+parseLine' xs =
+  let res = do
+        (a, xs') <- decimal xs
+        (d, ys) <- decimal (T.strip xs')
+        return (a, d, T.strip ys)
+  in case res of
+      Right (a, d, ys) -> (a, d, ys)
+      _ -> (0, 0, "")
 
 
 gitCommitStat :: Options -> CommitInfo -> IO CommitStat
@@ -127,15 +122,10 @@ gitCommitStat Options {..} com = case parentHashes com of
 
 gitCommitDeltaStat :: Options -> CommitInfo -> IO CommitStat
 gitCommitDeltaStat Options {..} com = do
-  (_, Just hout, _, ph) <- createProcess (proc
-                                           "git"
-                                           (  ["diff", "--numstat"]
-                                           <> [ "-w" | ignoreAllSpace ]
-                                           <> [(T.unpack . head . parentHashes) com, (T.unpack . commitHash) com]
-                                           )
-                                         ) { std_out = CreatePipe
-                                           , cwd     = repository
-                                           }
+  (_, Just hout, _, ph) <-
+    createProcess (proc "git" ( ["diff", "--numstat"]
+                                <> [ "-w" | ignoreAllSpace ]
+                                <> [(T.unpack . head . parentHashes) com, (T.unpack . commitHash) com])) { std_out = CreatePipe, cwd = repository }
 
   (add, del, _) <- unzip3 . fmap (parseLine fileExtension) . T.lines <$> T.hGetContents hout
 
@@ -147,16 +137,9 @@ gitCommitDeltaStat Options {..} com = do
   if verbose
     then
       T.putStrLn
-      $  " ["
-      <> author com
-      <> "] "
-      <> tshow (parentHashes com)
-      <> " -> "
-      <> commitHash com
-      <> " | insertions:"
-      <> tshow totalAdd
-      <> " deletions: "
-      <> tshow totalDel
+      $  " [" <> author com <> "] "
+      <> showt (parentHashes com)
+      <> " -> " <> commitHash com <> " | insertions:" <> showt totalAdd <> " deletions: " <> showt totalDel
       <> if (totalAdd + totalDel) == 0 then " (SKIPPED)" else ""
     else putChar (mkIcon (totalAdd + totalDel) (author com)) >> hFlush stdout
 
@@ -165,8 +148,9 @@ gitCommitDeltaStat Options {..} com = do
 
 gitCommitSingleStat :: Options -> CommitInfo -> IO CommitStat
 gitCommitSingleStat Options {..} com = do
-  (_, Just hout, _, _) <- createProcess (proc "git" (["log", "--oneline", "--numstat"] <> [(T.unpack . commitHash) com])
-                                        )
+  (_, Just hout, _, _) <- createProcess (
+    proc "git" (["log", "--oneline", "--numstat"] <> [(T.unpack . commitHash) com])
+      )
     { std_out = CreatePipe
     , cwd     = repository
     }
@@ -178,14 +162,8 @@ gitCommitSingleStat Options {..} com = do
   if verbose
     then
       T.putStrLn
-      $  " ["
-      <> author com
-      <> "] "
-      <> commitHash com
-      <> " | insertions:"
-      <> tshow totalAdd
-      <> " deletions: "
-      <> tshow totalDel
+      $  " [" <> author com <> "] " <> commitHash com <> " | insertions:" <> showt totalAdd <> " deletions: "
+      <> showt totalDel
       <> if (totalAdd + totalDel) == 0 then " (SKIPPED)" else ""
     else putChar (mkIcon (totalAdd + totalDel) (author com)) >> hFlush stdout
 
@@ -194,32 +172,39 @@ gitCommitSingleStat Options {..} com = do
 
 sumStat :: (Int, Int, Int) -> (Int, Int, Int) -> (Int, Int, Int)
 sumStat (a1, a2, a3) (b1, b2, b3) = (a1 + b1, a2 + b2, a3 + b3)
+{-# INLINE sumStat #-}
 
 
 aggregateStat :: [CommitStat] -> M.Map T.Text (Int, Int, Int)
-aggregateStat ss =
-  foldr (\st m -> M.insertWith sumStat ((author . commit) st) (insertions st, deletions st, 1) m) M.empty ss
+aggregateStat =
+  foldr (\st m -> M.insertWith sumStat ((author . commit) st) (insertions st, deletions st, 1) m) M.empty
+{-# INLINE aggregateStat #-}
 
 
 totalStats :: M.Map T.Text (Int, Int, Int) -> (Int, Int, Int)
 totalStats = foldr sumStat (0, 0, 0)
+{-# INLINE totalStats #-}
 
 
 printStat :: M.Map T.Text (Int, Int, Int) -> IO ()
 printStat m = void $ M.traverseWithKey
   (\k v ->
     T.putStrLn
-      $  "   author: "
-      <> k
-      <> " -> "
-      <> "insertions:"
-      <> tshow (sel1 v)
-      <> ", deletions: "
-      <> tshow (sel2 v)
-      <> ", commits: "
-      <> tshow (sel3 v)
-  )
-  m
+      $  "   author: " <> k <> " -> " <> "insertions:" <> showt (sel1 v)
+        <> ", deletions: " <> showt (sel2 v) <> ", commits: " <> showt (sel3 v)) m
 
-tshow :: Show a => a -> T.Text
-tshow = T.pack . show
+
+mayDrop :: Maybe Int -> [a] -> [a]
+mayDrop Nothing  x = x
+mayDrop (Just n) x = drop n x
+{-# INLINE mayDrop #-}
+
+mayTake :: Maybe Int -> [a] -> [a]
+mayTake Nothing  x = x
+mayTake (Just n) x = take n x
+{-# INLINE mayTake #-}
+
+mkIcon :: Int -> T.Text -> Char
+mkIcon 0 = const '.'
+mkIcon _ = T.head
+{-# INLINE mkIcon #-}
